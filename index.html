@@ -54,6 +54,33 @@
       </details>
     </section>
 
+    <!-- MATKA -->
+    <section id="view-trip" class="view" aria-label="Matka">
+      <div id="tripIdle">
+        <label class="field"><span>Työnumero (valinnainen)</span><input id="tripJob" autocapitalize="characters"></label>
+        <button id="tripStart" class="btn primary block" type="button">Aloita matka</button>
+        <p class="hint">Lähtöaika ja -paikka tallentuvat heti. Perillä paina <b>Lopeta matka</b>, niin tuloaika, tulopaikka ja kilometrit täyttyvät automaattisesti.</p>
+        <button id="tripManual" class="btn ghost block" type="button">Lisää matka käsin</button>
+      </div>
+      <div id="tripActive" hidden>
+        <div class="card trip-live"><b><span class="dot"></span>Matka käynnissä</b><p id="tripInfo"></p></div>
+        <button id="tripStop" class="btn primary block" type="button">Lopeta matka</button>
+        <button id="tripCancel" class="btn ghost block" type="button">Peru matka</button>
+      </div>
+      <div id="tripDraft" hidden>
+        <div class="card">
+          <div id="tripFields"></div>
+          <p id="kmNote" class="hint left"></p>
+          <div class="row">
+            <button id="tripCalc" class="btn" type="button">Laske kilometrit</button>
+            <span class="spacer"></span>
+            <button id="tripDiscard" class="btn ghost" type="button">Hylkää</button>
+          </div>
+        </div>
+        <button id="tripSave" class="btn primary block" type="button">Tallenna matka</button>
+      </div>
+    </section>
+
     <!-- TUNTILISTA -->
     <section id="view-list" class="view" aria-label="Tuntilista">
       <div class="weeknav">
@@ -91,6 +118,10 @@
     <button type="button" data-view="record" class="active">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
       Kirjaa
+    </button>
+    <button type="button" data-view="trip">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg>
+      Matka
     </button>
     <button type="button" data-view="list">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v2H4V5Zm0 6h16v2H4v-2Zm0 6h10v2H4v-2Z"/></svg>

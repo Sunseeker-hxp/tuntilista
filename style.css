@@ -152,7 +152,7 @@ summary { cursor: pointer; font-weight: 600; }
 /* Alapalkki */
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
-  display: grid; grid-template-columns: 1fr 1fr;
+  display: grid; grid-template-columns: repeat(3, 1fr);
   background: var(--surface); border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -179,3 +179,12 @@ dialog h2 { margin: 0 0 14px; font-size: 18px; }
   font-size: 15px; transition: .25s; max-width: calc(100vw - 32px); z-index: 10;
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Matka */
+#view-trip .btn.block { margin-top: 10px; }
+.hint.left { text-align: left; margin: 10px 0 0; }
+#tripIdle .hint { margin: 14px 0; }
+.trip-live p { margin: 6px 0 0; color: var(--muted); }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--rec); margin-right: 8px; animation: blink 1.2s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.btn:disabled { opacity: .6; }

@@ -44,6 +44,7 @@
     document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
     document.querySelectorAll('.view').forEach((s) => s.classList.toggle('active', s.id === 'view-' + v));
     if (v === 'list') renderList();
+    if (v === 'trip') renderTrip();
     window.scrollTo(0, 0);
   }
 
@@ -105,12 +106,19 @@
 
   // ---------- Luonnokset ----------
   function fieldsHTML(e) {
+    const km = `<span>Kilometrit</span><input data-f="km" inputmode="decimal" value="${esc(fmtNum(e.km))}" placeholder="0">`;
     return `
       <div class="grid">
         <label><span>Päivä</span><input type="date" data-f="date" value="${esc(e.date)}"></label>
         <label><span>Työnumero</span><input data-f="job" value="${esc(e.job)}" autocapitalize="characters"></label>
+        ${e.type === 'trip' ? `
+        <label><span>Lähtöaika</span><input type="time" data-f="depTime" value="${esc(e.depTime)}"></label>
+        <label><span>Tuloaika</span><input type="time" data-f="arrTime" value="${esc(e.arrTime)}"></label>
+        <label class="wide"><span>Lähtöpaikka</span><input data-f="depPlace" value="${esc(e.depPlace)}" placeholder="Katu, paikkakunta"></label>
+        <label class="wide"><span>Tulopaikka</span><input data-f="arrPlace" value="${esc(e.arrPlace)}" placeholder="Katu, paikkakunta"></label>
+        <label class="wide">${km}</label>` : `
         <label><span>Tunnit</span><input data-f="hours" inputmode="decimal" value="${esc(fmtNum(e.hours))}" placeholder="0"></label>
-        <label><span>Kilometrit</span><input data-f="km" inputmode="decimal" value="${esc(fmtNum(e.km))}" placeholder="0"></label>
+        <label>${km}</label>`}
         <label class="wide"><span>Kuvaus</span><input data-f="note" value="${esc(e.note)}"></label>
       </div>`;
   }
@@ -184,7 +192,7 @@
     const { week } = isoWeek(mon);
     $('#weekTitle').textContent = `Viikko ${week}` + (weekOffset === 0 ? ' (tämä)' : '');
     $('#weekRange').textContent = `${mon.getDate()}.${mon.getMonth() + 1}. – ${sun.getDate()}.${sun.getMonth() + 1}.${sun.getFullYear()}`;
-    const list = weekEntries().sort((a, b) => (a.date + (a.start || '') + a.createdAt).localeCompare(b.date + (b.start || '') + b.createdAt));
+    const list = weekEntries().sort((a, b) => (a.date + (a.start || a.depTime || '') + a.createdAt).localeCompare(b.date + (b.start || b.depTime || '') + b.createdAt));
     $('#weekHours').textContent = fmtNum(sum(list, 'hours')) || '0';
     $('#weekKm').textContent = fmtNum(sum(list, 'km')) || '0';
     const jobs = {};
@@ -204,8 +212,10 @@
         items.map((e) => `
           <button class="entry" type="button" data-id="${e.id}">
             <span class="job">${e.job ? esc(e.job) : '<i>ei työnumeroa</i>'}</span>
-            <span class="h">${e.hours ? fmtNum(e.hours) + ' h' : ''}</span>
-            <span class="meta">${[e.start ? `klo ${esc(e.start)}–${esc(e.end)}` : '', e.km ? fmtNum(e.km) + ' km' : '', esc(e.note)].filter(Boolean).join(' · ') || '&nbsp;'}</span>
+            <span class="h">${e.hours ? fmtNum(e.hours) + ' h' : e.type === 'trip' ? fmtNum(e.km || 0) + ' km' : ''}</span>
+            <span class="meta">${(e.type === 'trip'
+              ? [`${esc(e.depTime)} ${esc(e.depPlace)} → ${esc(e.arrTime)} ${esc(e.arrPlace)}`, esc(e.note)]
+              : [e.start ? `klo ${esc(e.start)}–${esc(e.end)}` : '', e.km ? fmtNum(e.km) + ' km' : '', esc(e.note)]).filter(Boolean).join(' · ') || '&nbsp;'}</span>
           </button>`).join('');
     }).join('');
     $('#jobSummary').innerHTML = `<h3>Työnumeroittain</h3><table class="jobs"><thead><tr><th>Työnumero</th><th>Tunnit</th><th>Km</th></tr></thead><tbody>` +
@@ -238,10 +248,10 @@
   function toCSV(list) {
     const q = (v) => { const s = String(v == null ? '' : v); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const num = (n) => (n == null || n === '' ? '' : String(n).replace('.', ','));
-    const rows = [['Päivämäärä', 'Viikko', 'Työntekijä', 'Työnumero', 'Tunnit', 'Kilometrit', 'Alku', 'Loppu', 'Kuvaus']];
+    const rows = [['Päivämäärä', 'Viikko', 'Työntekijä', 'Työnumero', 'Tunnit', 'Kilometrit', 'Alku', 'Loppu', 'Lähtöaika', 'Lähtöpaikka', 'Tuloaika', 'Tulopaikka', 'Kuvaus']];
     list.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach((e) => {
       const d = parseISO(e.date);
-      rows.push([`${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`, isoWeek(d).week, settings.name, e.job, num(e.hours), num(e.km), e.start || '', e.end || '', e.note]);
+      rows.push([`${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`, isoWeek(d).week, settings.name, e.job, num(e.hours), num(e.km), e.start || '', e.end || '', e.depTime || '', e.depPlace || '', e.arrTime || '', e.arrPlace || '', e.note]);
     });
     return '﻿' + rows.map((r) => r.map(q).join(';')).join('\r\n');
   }
@@ -271,7 +281,9 @@
     if (!list.length) { toast('Viikolla ei ole kirjauksia.'); return; }
     const { week } = isoWeek(weekBounds().mon);
     const lines = [`Tuntilista vko ${week}${settings.name ? ' – ' + settings.name : ''}`];
-    list.forEach((e) => lines.push(`${fmtDay(parseISO(e.date))} ${e.job || '-'}: ${fmtNum(e.hours) || 0} h${e.km ? ', ' + fmtNum(e.km) + ' km' : ''}${e.note ? ' (' + e.note + ')' : ''}`));
+    list.forEach((e) => lines.push(e.type === 'trip'
+      ? `${fmtDay(parseISO(e.date))} ${e.job || '-'}: matka ${fmtNum(e.km) || 0} km, ${e.depTime} ${e.depPlace} → ${e.arrTime} ${e.arrPlace}${e.note ? ' (' + e.note + ')' : ''}`
+      : `${fmtDay(parseISO(e.date))} ${e.job || '-'}: ${fmtNum(e.hours) || 0} h${e.km ? ', ' + fmtNum(e.km) + ' km' : ''}${e.note ? ' (' + e.note + ')' : ''}`));
     lines.push(`Yhteensä ${fmtNum(sum(list, 'hours'))} h, ${fmtNum(sum(list, 'km')) || 0} km`);
     try { await navigator.clipboard.writeText(lines.join('\n')); toast('Kopioitu leikepöydälle'); }
     catch { toast('Kopiointi ei onnistunut'); }
@@ -284,6 +296,131 @@
   $('#wipeBtn').addEventListener('click', () => {
     if (!entries.length) return;
     if (confirm(`Poistetaanko kaikki ${entries.length} kirjausta pysyvästi?`)) { entries = []; persist(); renderList(); renderToday(); }
+  });
+
+  // ---------- Matkat: lähtö/tulo sijainnista, kilometrit ajoreitin mukaan ----------
+  // Osoitteet: OpenStreetMap Nominatim. Reitti: OSRM. Molemmille lähetetään vain koordinaatit / paikan nimi.
+  let activeTrip = store.load('tl.trip', null);
+  let tripDraft = store.load('tl.tripDraft', null);
+  const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  const saveTripState = () => { store.save('tl.trip', activeTrip); store.save('tl.tripDraft', tripDraft); };
+
+  function getPos() {
+    return new Promise((res, rej) => {
+      if (!navigator.geolocation) return rej(new Error('nogeo'));
+      navigator.geolocation.getCurrentPosition(
+        (p) => res({ lat: p.coords.latitude, lon: p.coords.longitude }), rej,
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
+    });
+  }
+  async function fetchJSON(url) {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 12000);
+    try { const r = await fetch(url, { signal: c.signal }); if (!r.ok) throw new Error(r.status); return await r.json(); }
+    finally { clearTimeout(t); }
+  }
+  const coordText = (p) => p.lat.toFixed(5) + ', ' + p.lon.toFixed(5);
+  async function placeName(pos) {
+    try {
+      const j = await fetchJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=fi&lat=${pos.lat}&lon=${pos.lon}`);
+      const a = j.address || {};
+      const street = [a.road || a.pedestrian || a.hamlet || a.suburb, a.house_number].filter(Boolean).join(' ');
+      const s = [street, a.city || a.town || a.village || a.municipality].filter(Boolean).join(', ');
+      if (s) return s;
+    } catch { /* verkko poikki: käytetään koordinaatteja */ }
+    return coordText(pos);
+  }
+  async function geocode(q) {
+    const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (m) return { lat: +m[1], lon: +m[2] };
+    for (const cc of ['&countrycodes=fi', '']) {
+      try {
+        const j = await fetchJSON('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=fi' + cc + '&q=' + encodeURIComponent(q));
+        if (j[0]) return { lat: +j[0].lat, lon: +j[0].lon };
+      } catch { return null; }
+    }
+    return null;
+  }
+  function haversine(a, b) {
+    const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+    const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
+    return 6371 * 2 * Math.asin(Math.sqrt(x));
+  }
+  async function routeKm(a, b) {
+    try {
+      const j = await fetchJSON(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`);
+      if (j.routes && j.routes[0]) return { km: Math.round(j.routes[0].distance / 100) / 10, exact: true };
+    } catch { /* arvio alla */ }
+    return { km: Math.round(haversine(a, b) * 1.3 * 10) / 10, exact: false };
+  }
+  const kmNoteText = (r) => r.exact ? 'Kilometrit laskettu ajoreitin mukaan lähtö- ja tulopaikan välille. Korjaa, jos ajoit muuta reittiä.'
+    : 'Reittiä ei saatu haettua. Kilometrit ovat arvio linnuntie-etäisyydestä – tarkista.';
+
+  function renderTrip() {
+    $('#tripIdle').hidden = !!(activeTrip || tripDraft);
+    $('#tripActive').hidden = !(activeTrip && !tripDraft);
+    $('#tripDraft').hidden = !tripDraft;
+    if (activeTrip) $('#tripInfo').textContent = `Lähtö klo ${activeTrip.depTime} · ${activeTrip.depPlace || 'sijainti ei tiedossa'}` + (activeTrip.job ? ` · työnumero ${activeTrip.job}` : '');
+    if (tripDraft) { $('#tripFields').innerHTML = fieldsHTML(tripDraft); $('#kmNote').textContent = tripDraft.kmNote || ''; }
+  }
+  async function locate(btn, busyText) {
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = busyText;
+    let pos = null, place = '';
+    try { pos = await getPos(); place = await placeName(pos); }
+    catch { toast('Sijaintia ei saatu. Salli sijainnin käyttö tai kirjoita paikka käsin.'); }
+    btn.disabled = false; btn.textContent = label;
+    return { pos, place };
+  }
+
+  $('#tripStart').addEventListener('click', async (ev) => {
+    const now = new Date();
+    const { pos, place } = await locate(ev.currentTarget, 'Haetaan sijaintia…');
+    activeTrip = { date: P.iso(now), depTime: hhmm(now), pos, depPlace: place, job: $('#tripJob').value.trim().toUpperCase() };
+    saveTripState(); renderTrip();
+    toast('Matka aloitettu klo ' + activeTrip.depTime);
+  });
+  $('#tripStop').addEventListener('click', async (ev) => {
+    const now = new Date();
+    const { pos, place } = await locate(ev.currentTarget, 'Haetaan sijaintia ja reittiä…');
+    const t = activeTrip;
+    tripDraft = { id: uid(), type: 'trip', date: t.date, job: t.job, depTime: t.depTime, depPlace: t.depPlace, arrTime: hhmm(now), arrPlace: place,
+      km: null, note: '', a: t.pos, b: pos, aPlace: t.depPlace, bPlace: place, kmNote: '' };
+    if (t.pos && pos) { const r = await routeKm(t.pos, pos); tripDraft.km = r.km; tripDraft.kmNote = kmNoteText(r); }
+    else tripDraft.kmNote = 'Sijainti puuttuu. Kirjoita paikat ja paina Laske kilometrit.';
+    activeTrip = null; saveTripState(); renderTrip();
+  });
+  $('#tripCancel').addEventListener('click', () => { activeTrip = null; saveTripState(); renderTrip(); toast('Matka peruttu'); });
+  $('#tripManual').addEventListener('click', () => {
+    const now = new Date();
+    tripDraft = { id: uid(), type: 'trip', date: P.iso(now), job: $('#tripJob').value.trim().toUpperCase(), depTime: '', depPlace: '', arrTime: '', arrPlace: '', km: null, note: '',
+      kmNote: 'Kirjoita lähtö- ja tulopaikka ja paina Laske kilometrit.' };
+    saveTripState(); renderTrip();
+  });
+  $('#tripFields').addEventListener('input', () => { if (tripDraft) { readFields($('#tripFields'), tripDraft); store.save('tl.tripDraft', tripDraft); } });
+  $('#tripDiscard').addEventListener('click', () => { tripDraft = null; saveTripState(); renderTrip(); });
+  $('#tripCalc').addEventListener('click', async (ev) => {
+    const d = readFields($('#tripFields'), tripDraft);
+    if (!d.depPlace || !d.arrPlace) { toast('Kirjoita ensin lähtö- ja tulopaikka.'); return; }
+    const btn = ev.currentTarget; btn.disabled = true; btn.textContent = 'Lasketaan…';
+    // GPS-sijaintia käytetään, jos paikan tekstiä ei ole muutettu; muuten haetaan osoitteen perusteella
+    const a = d.a && d.depPlace === d.aPlace ? d.a : await geocode(d.depPlace);
+    const b = d.b && d.arrPlace === d.bPlace ? d.b : await geocode(d.arrPlace);
+    btn.disabled = false; btn.textContent = 'Laske kilometrit';
+    if (!a || !b) { toast(`Paikkaa ei löytynyt: ${!a ? d.depPlace : d.arrPlace}. Tarkenna osoitetta tai kirjoita kilometrit käsin.`); return; }
+    const r = await routeKm(a, b);
+    Object.assign(d, { km: r.km, kmNote: kmNoteText(r), a, b, aPlace: d.depPlace, bPlace: d.arrPlace });
+    saveTripState(); renderTrip();
+  });
+  $('#tripSave').addEventListener('click', () => {
+    const d = readFields($('#tripFields'), tripDraft);
+    if (!d.date || !d.depTime || !d.depPlace || !d.arrTime || !d.arrPlace) { toast('Täytä päivä, lähtöaika ja -paikka sekä tuloaika ja -paikka.'); return; }
+    if (d.km == null) { toast('Kilometrit puuttuvat. Paina Laske kilometrit tai kirjoita ne käsin.'); return; }
+    entries.push({ id: d.id, type: 'trip', date: d.date, job: d.job, hours: null, km: d.km, note: d.note,
+      depTime: d.depTime, depPlace: d.depPlace, arrTime: d.arrTime, arrPlace: d.arrPlace, createdAt: new Date().toISOString() });
+    persist();
+    tripDraft = null; saveTripState(); renderTrip();
+    toast(`Matka tallennettu: ${fmtNum(d.km)} km ✓`);
   });
 
   renderToday();
