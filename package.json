@@ -1,0 +1,10 @@
+{
+  "name": "tuntilista",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Työtuntien kirjaus sanelemalla (PWA)",
+  "scripts": {
+    "test": "node --test test/parser.test.js",
+    "start": "npx --yes serve -l 8080 ."
+  }
+}
