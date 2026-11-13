@@ -188,3 +188,7 @@ dialog h2 { margin: 0 0 14px; font-size: 18px; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--rec); margin-right: 8px; animation: blink 1.2s infinite; }
 @keyframes blink { 50% { opacity: .25; } }
 .btn:disabled { opacity: .6; }
+.bigkm { font-size: 34px; font-weight: 700; color: var(--text) !important; margin: 8px 0 0 !important; font-variant-numeric: tabular-nums; }
+.offline { background: var(--warn-bg); color: var(--warn-text); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
+.install { display: flex; align-items: center; gap: 12px; }
+.install p { margin: 0; flex: 1; font-size: 14px; }

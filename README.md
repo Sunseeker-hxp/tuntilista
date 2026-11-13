@@ -9,7 +9,8 @@ päivän, työnumeron, tunnit, kilometrit ja kuvauksen. Rivit tarkistetaan ennen
 - Monta kirjausta yhdellä sanelulla: ”työnumero 1234 neljä tuntia ja työnumero 5678 kolme tuntia”.
 - Kellonajat ja tauot: ”kello 7 – 15.30, ruokatauko 30 min” → 8 h.
 - Päivät: tänään (oletus), eilen, toissapäivänä, maanantaina, 10.11.
-- Matkat: **Aloita matka** / **Lopeta matka** tallentaa lähtö- ja tuloajan sekä -paikan (GPS), kilometrit lasketaan ajoreitin mukaan. Osoitteet haetaan OpenStreetMapin Nominatim-palvelusta ja reitti OSRM-palvelusta.
+- Matkat: **Aloita matka** / **Lopeta matka** tallentaa lähtö- ja tuloajan sekä -paikan. Ajetut kilometrit mitataan GPS-seurannalla matkan aikana (sovellus auki, näyttö pysyy päällä). Jos seuranta katkeaa, kilometrit lasketaan ajoreitin mukaan (OSRM). Osoitteet haetaan OpenStreetMapin Nominatim-palvelusta.
+- Ilman verkkoa: asennuksen jälkeen kirjaukset, matkat ja GPS-kilometrit toimivat offline. Paikat tallentuvat koordinaatteina ja vaihtuvat osoitteiksi, kun verkko palaa. Sanelunappi tarvitsee verkon.
 - Viikkonäkymä: päiväkohtaiset summat, viikon tunnit/km, yhteenveto työnumeroittain.
 - Vienti: CSV (Excel-yhteensopiva, `;` ja desimaalipilkku) jakovalikon kautta, tai teksti leikepöydälle.
 - Toimii offline ja asentuu kotinäytölle. Tiedot tallentuvat puhelimen muistiin.

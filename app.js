@@ -82,7 +82,7 @@
     };
     rec.onerror = (e) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') toast('Mikrofonin käyttö on estetty selaimen asetuksista.');
-      else if (e.error === 'network') toast('Puheentunnistus tarvitsee verkkoyhteyden.');
+      else if (e.error === 'network') { toast('Puheentunnistus tarvitsee verkon. Kirjoita tai käytä näppäimistön mikrofonia.'); transcript.focus(); }
       else if (e.error !== 'no-speech' && e.error !== 'aborted') toast('Puheentunnistus: ' + e.error);
     };
     rec.onend = () => { setListening(false); if (transcript.value.trim()) interpret(); };
@@ -320,15 +320,36 @@
     finally { clearTimeout(t); }
   }
   const coordText = (p) => p.lat.toFixed(5) + ', ' + p.lon.toFixed(5);
-  async function placeName(pos) {
+  async function reverseName(pos) {
     try {
       const j = await fetchJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=fi&lat=${pos.lat}&lon=${pos.lon}`);
       const a = j.address || {};
       const street = [a.road || a.pedestrian || a.hamlet || a.suburb, a.house_number].filter(Boolean).join(' ');
       const s = [street, a.city || a.town || a.village || a.municipality].filter(Boolean).join(', ');
       if (s) return s;
-    } catch { /* verkko poikki: käytetään koordinaatteja */ }
-    return coordText(pos);
+    } catch { /* verkko poikki */ }
+    return null;
+  }
+  // Ilman verkkoa paikaksi jää koordinaatit; ne vaihdetaan osoitteeksi, kun verkko palaa.
+  const placeName = async (pos) => (navigator.onLine && await reverseName(pos)) || coordText(pos);
+  const COORD_RE = /^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/;
+  let resolving = false;
+  async function resolvePlaces() {
+    if (resolving || !navigator.onLine) return;
+    resolving = true;
+    let changed = false;
+    for (const e of entries.filter((x) => x.type === 'trip')) {
+      for (const f of ['depPlace', 'arrPlace']) {
+        const m = (e[f] || '').match(COORD_RE);
+        if (!m) continue;
+        const name = await reverseName({ lat: +m[1], lon: +m[2] });
+        if (!name) { resolving = false; if (changed) persist(); return; }
+        e[f] = name; changed = true;
+        await new Promise((r) => setTimeout(r, 1100)); // palvelun käyttöehto: enintään 1 haku sekunnissa
+      }
+    }
+    resolving = false;
+    if (changed) { persist(); if ($('#view-list').classList.contains('active')) renderList(); }
   }
   async function geocode(q) {
     const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
@@ -346,12 +367,65 @@
     const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
     return 6371 * 2 * Math.asin(Math.sqrt(x));
   }
-  async function routeKm(a, b) {
+  async function routeOnline(a, b) {
+    if (!navigator.onLine) return null;
     try {
       const j = await fetchJSON(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`);
-      if (j.routes && j.routes[0]) return { km: Math.round(j.routes[0].distance / 100) / 10, exact: true };
-    } catch { /* arvio alla */ }
-    return { km: Math.round(haversine(a, b) * 1.3 * 10) / 10, exact: false };
+      if (j.routes && j.routes[0]) return Math.round(j.routes[0].distance / 100) / 10;
+    } catch { /* ei reittiä */ }
+    return null;
+  }
+  async function routeKm(a, b) {
+    const km = await routeOnline(a, b);
+    return km != null ? { km, exact: true } : { km: Math.round(haversine(a, b) * 1.3 * 10) / 10, exact: false };
+  }
+
+  // ---------- GPS-seuranta matkan ajan ----------
+  // Summaa ajetun matkan sijaintipisteistä. Toimii ilman verkkoa, mutta vain kun sovellus on auki.
+  let watchId = null, wakeLock = null;
+  async function requestWake() {
+    try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); }
+    catch { /* näytön päällä pito ei ole pakollinen */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && activeTrip) requestWake(); });
+  function startTracking() {
+    if (!navigator.geolocation || watchId != null || !activeTrip) return;
+    watchId = navigator.geolocation.watchPosition(onFix, () => { if (activeTrip) { activeTrip.acc = null; renderLive(); } },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+    requestWake();
+  }
+  function stopTracking() {
+    if (watchId != null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+  function addPoint(tr, pt, minM) {
+    if (!tr.last) { tr.last = pt; tr.n = 1; return; }
+    const d = haversine(tr.last, pt) * 1000;
+    if (d < minM) return;
+    // pitkä hyppy pitkän tauon jälkeen = seuranta oli poikki (sovellus taustalla); väli lasketaan suorana viivana
+    if (pt.t - tr.last.t > 120000 && d > 300) tr.gaps++;
+    tr.m += d; tr.last = pt; tr.n++;
+  }
+  function onFix(p) {
+    if (!activeTrip) return;
+    const acc = p.coords.accuracy;
+    activeTrip.acc = Math.round(acc);
+    if (acc <= 50) {
+      const pt = { lat: p.coords.latitude, lon: p.coords.longitude, t: Date.now() };
+      if (!activeTrip.pos) { activeTrip.pos = { lat: pt.lat, lon: pt.lon }; if (!activeTrip.depPlace) activeTrip.depPlace = coordText(pt); }
+      if (!activeTrip.track) activeTrip.track = { m: 0, last: null, gaps: 0, n: 0 };
+      addPoint(activeTrip.track, pt, Math.max(20, acc)); // kynnys suodattaa paikallaan olon GPS-heilunnan
+      store.save('tl.trip', activeTrip);
+    }
+    renderLive();
+  }
+  function renderLive() {
+    if (!activeTrip) return;
+    const tr = activeTrip.track;
+    $('#tripKm').textContent = fmtNum(Math.round((tr ? tr.m : 0) / 100) / 10) || '0';
+    $('#tripGps').textContent = activeTrip.acc == null ? 'Odotetaan GPS-signaalia…'
+      : activeTrip.acc > 50 ? `GPS-signaali heikko (±${activeTrip.acc} m)` : `GPS-tarkkuus ±${activeTrip.acc} m`;
   }
   const kmNoteText = (r) => r.exact ? 'Kilometrit laskettu ajoreitin mukaan lähtö- ja tulopaikan välille. Korjaa, jos ajoit muuta reittiä.'
     : 'Reittiä ei saatu haettua. Kilometrit ovat arvio linnuntie-etäisyydestä – tarkista.';
@@ -360,6 +434,7 @@
     $('#tripIdle').hidden = !!(activeTrip || tripDraft);
     $('#tripActive').hidden = !(activeTrip && !tripDraft);
     $('#tripDraft').hidden = !tripDraft;
+    if (activeTrip) renderLive();
     if (activeTrip) $('#tripInfo').textContent = `Lähtö klo ${activeTrip.depTime} · ${activeTrip.depPlace || 'sijainti ei tiedossa'}` + (activeTrip.job ? ` · työnumero ${activeTrip.job}` : '');
     if (tripDraft) { $('#tripFields').innerHTML = fieldsHTML(tripDraft); $('#kmNote').textContent = tripDraft.kmNote || ''; }
   }
@@ -377,20 +452,33 @@
     const now = new Date();
     const { pos, place } = await locate(ev.currentTarget, 'Haetaan sijaintia…');
     activeTrip = { date: P.iso(now), depTime: hhmm(now), pos, depPlace: place, job: $('#tripJob').value.trim().toUpperCase() };
-    saveTripState(); renderTrip();
+    if (pos) activeTrip.track = { m: 0, last: { lat: pos.lat, lon: pos.lon, t: Date.now() }, gaps: 0, n: 1 };
+    saveTripState(); renderTrip(); startTracking();
     toast('Matka aloitettu klo ' + activeTrip.depTime);
   });
   $('#tripStop').addEventListener('click', async (ev) => {
     const now = new Date();
-    const { pos, place } = await locate(ev.currentTarget, 'Haetaan sijaintia ja reittiä…');
-    const t = activeTrip;
+    let { pos, place } = await locate(ev.currentTarget, 'Haetaan sijaintia…');
+    stopTracking();
+    const t = activeTrip, tr = t.track;
+    if (!pos && tr && tr.last) { pos = { lat: tr.last.lat, lon: tr.last.lon }; place = await placeName(pos); }
+    if (tr && pos) addPoint(tr, { lat: pos.lat, lon: pos.lon, t: Date.now() }, 20);
     tripDraft = { id: uid(), type: 'trip', date: t.date, job: t.job, depTime: t.depTime, depPlace: t.depPlace, arrTime: hhmm(now), arrPlace: place,
       km: null, note: '', a: t.pos, b: pos, aPlace: t.depPlace, bPlace: place, kmNote: '' };
-    if (t.pos && pos) { const r = await routeKm(t.pos, pos); tripDraft.km = r.km; tripDraft.kmNote = kmNoteText(r); }
-    else tripDraft.kmNote = 'Sijainti puuttuu. Kirjoita paikat ja paina Laske kilometrit.';
+    const d = tripDraft;
+    const tracked = tr && tr.n > 1 ? Math.round(tr.m / 100) / 10 : null;
+    if (tracked != null && !tr.gaps) {
+      d.km = tracked; d.kmNote = 'Kilometrit mitattu GPS:llä ajetun matkan mukaan.';
+    } else if (tracked != null) {
+      // seurannassa katkoja: GPS-lukema on alaraja, joten käytetään ajoreittiä jos se on pidempi
+      const r = t.pos && pos ? await routeOnline(t.pos, pos) : null;
+      if (r != null && r > tracked) { d.km = r; d.kmNote = 'GPS-seuranta katkesi matkan aikana (sovellus oli taustalla), joten kilometrit on laskettu ajoreitin mukaan. Tarkista.'; }
+      else { d.km = tracked; d.kmNote = 'GPS-seuranta katkesi matkan aikana (sovellus oli taustalla). Kilometrit voivat olla todellista pienemmät – tarkista.'; }
+    } else if (t.pos && pos) { const r = await routeKm(t.pos, pos); d.km = r.km; d.kmNote = kmNoteText(r); }
+    else d.kmNote = 'Sijainti puuttuu. Kirjoita paikat ja kilometrit käsin.';
     activeTrip = null; saveTripState(); renderTrip();
   });
-  $('#tripCancel').addEventListener('click', () => { activeTrip = null; saveTripState(); renderTrip(); toast('Matka peruttu'); });
+  $('#tripCancel').addEventListener('click', () => { stopTracking(); activeTrip = null; saveTripState(); renderTrip(); toast('Matka peruttu'); });
   $('#tripManual').addEventListener('click', () => {
     const now = new Date();
     tripDraft = { id: uid(), type: 'trip', date: P.iso(now), job: $('#tripJob').value.trim().toUpperCase(), depTime: '', depPlace: '', arrTime: '', arrPlace: '', km: null, note: '',
@@ -421,7 +509,20 @@
     persist();
     tripDraft = null; saveTripState(); renderTrip();
     toast(`Matka tallennettu: ${fmtNum(d.km)} km ✓`);
+    resolvePlaces();
   });
+  if (activeTrip) startTracking(); // matka jatkuu, jos sovellus suljettiin välillä
+
+  // ---------- Verkkotila ja asennus ----------
+  function netState() { $('#offline').hidden = navigator.onLine; if (navigator.onLine) resolvePlaces(); }
+  window.addEventListener('online', netState);
+  window.addEventListener('offline', netState);
+  netState();
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); // pyydä, ettei selain tyhjennä kirjauksia
+  let installEvt = null;
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#installCard').hidden = false; });
+  window.addEventListener('appinstalled', () => { $('#installCard').hidden = true; toast('Sovellus asennettu ✓'); });
+  $('#installBtn').addEventListener('click', async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; $('#installCard').hidden = true; });
 
   renderToday();
 

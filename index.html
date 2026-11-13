@@ -15,7 +15,7 @@
 <body>
   <header class="top">
     <h1>Tuntilista</h1>
-    <span id="todaySum" class="pill"></span>
+    <span class="pill"><span id="offline" class="offline" hidden>Ei verkkoa</span> <span id="todaySum"></span></span>
   </header>
 
   <main>
@@ -40,6 +40,11 @@
       <div id="drafts"></div>
       <button id="saveBtn" class="btn primary block" type="button" hidden>Tallenna</button>
 
+      <div id="installCard" class="card install" hidden>
+        <p><b>Asenna sovellus puhelimeen</b><br>Asennettuna se aukeaa kotinäytöltä ja toimii myös ilman verkkoa.</p>
+        <button id="installBtn" class="btn primary" type="button">Asenna</button>
+      </div>
+
       <details class="help">
         <summary>Sanelu­vinkit</summary>
         <ul>
@@ -49,6 +54,7 @@
           <li><b>Kilometrit:</b> ”42 km”, ”ajoa 120 kilometriä”, ”kilometrit 30”.</li>
           <li><b>Päivä:</b> oletuksena tänään. ”eilen”, ”maanantaina”, ”10.11.”.</li>
           <li><b>Kuvaus:</b> ”kuvaus putkien asennus” – tai muut sanat jäävät kuvaukseksi.</li>
+          <li><b>Ilman verkkoa:</b> sanelunappi tarvitsee verkon. Kirjoita teksti tai käytä näppäimistön mikrofonia ja paina Tulkitse.</li>
           <li><b>Monta riviä kerralla:</b> ”työnumero 1234 neljä tuntia ja työnumero 5678 kolme tuntia”.</li>
         </ul>
       </details>
@@ -63,7 +69,13 @@
         <button id="tripManual" class="btn ghost block" type="button">Lisää matka käsin</button>
       </div>
       <div id="tripActive" hidden>
-        <div class="card trip-live"><b><span class="dot"></span>Matka käynnissä</b><p id="tripInfo"></p></div>
+        <div class="card trip-live">
+          <b><span class="dot"></span>Matka käynnissä</b>
+          <p class="bigkm"><span id="tripKm">0</span> km</p>
+          <p id="tripGps"></p>
+          <p id="tripInfo"></p>
+        </div>
+        <p class="hint">Pidä sovellus auki matkan ajan – näyttö pysyy päällä. Jos sovellus on taustalla tai puhelin lukossa, kilometrit eivät kerry.</p>
         <button id="tripStop" class="btn primary block" type="button">Lopeta matka</button>
         <button id="tripCancel" class="btn ghost block" type="button">Peru matka</button>
       </div>
