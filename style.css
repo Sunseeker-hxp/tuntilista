@@ -192,3 +192,4 @@ dialog h2 { margin: 0 0 14px; font-size: 18px; }
 .offline { background: var(--warn-bg); color: var(--warn-text); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
 .install { display: flex; align-items: center; gap: 12px; }
 .install p { margin: 0; flex: 1; font-size: 14px; }
+.warntext { background: var(--warn-bg); color: var(--warn-text) !important; border-radius: 10px; padding: 8px 10px; }

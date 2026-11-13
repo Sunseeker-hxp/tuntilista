@@ -1,5 +1,6 @@
 (() => {
   'use strict';
+  const APP_VERSION = 5; // pidä samana kuin sw.js:n välimuistin versio
   const P = window.TuntiParser;
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -433,12 +434,16 @@
     }
     renderLive();
   }
+  const COARSE_M = 200;
+  const COARSE_HELP = 'Puhelin antaa Chromelle vain likimääräisen sijainnin. Ota tarkka sijainti käyttöön: puhelimen Asetukset → Sovellukset → Chrome → Luvat → Sijainti → Käytä tarkkaa sijaintia.';
   function renderLive() {
     if (!activeTrip) return;
     const tr = activeTrip.track;
     $('#tripKm').textContent = fmtNum(Math.round((tr ? tr.m : 0) / 100) / 10) || '0';
     $('#tripGps').textContent = activeTrip.acc == null ? 'Odotetaan GPS-signaalia…'
+      : activeTrip.acc > COARSE_M ? `Sijainti epätarkka (±${activeTrip.acc} m) – kilometrit eivät kerry. ${COARSE_HELP}`
       : activeTrip.acc > 50 ? `GPS-signaali heikko (±${activeTrip.acc} m)` : `GPS-tarkkuus ±${activeTrip.acc} m`;
+    $('#tripGps').classList.toggle('warntext', activeTrip.acc != null && activeTrip.acc > COARSE_M);
   }
   const kmNoteText = (r) => r.exact ? 'Kilometrit laskettu ajoreitin mukaan lähtö- ja tulopaikan välille. Korjaa, jos ajoit muuta reittiä.'
     : 'Reittiä ei saatu haettua. Kilometrit ovat arvio linnuntie-etäisyydestä – tarkista.';
@@ -455,7 +460,12 @@
     const label = btn.textContent;
     btn.disabled = true; btn.textContent = busyText;
     let pos = null, place = '';
-    try { pos = await getPos(); place = await placeName(pos); }
+    try {
+      pos = await getPos();
+      // Yli 200 m:n epätarkkuus = likimääräinen sijainti: osoite olisi väärä, joten sitä ei täytetä
+      if (pos.acc > COARSE_M) toast(`Sijainti on epätarkka (±${pos.acc} m). Paikkaa ei täytetty.`);
+      else place = await placeName(pos);
+    }
     catch { toast('Sijaintia ei saatu. Salli sijainnin käyttö tai kirjoita paikka käsin.'); }
     btn.disabled = false; btn.textContent = label;
     return { pos, place };
@@ -465,7 +475,7 @@
     const now = new Date();
     const { pos, place } = await locate(ev.currentTarget, 'Haetaan tarkkaa sijaintia…');
     activeTrip = { date: P.iso(now), depTime: hhmm(now), pos, depPlace: place, job: $('#tripJob').value.trim().toUpperCase() };
-    if (pos) activeTrip.track = { m: 0, last: { lat: pos.lat, lon: pos.lon, t: Date.now() }, gaps: 0, n: 1 };
+    if (pos && pos.acc <= 50) activeTrip.track = { m: 0, last: { lat: pos.lat, lon: pos.lon, t: Date.now() }, gaps: 0, n: 1 };
     saveTripState(); renderTrip(); startTracking();
     toast('Matka aloitettu klo ' + activeTrip.depTime);
   });
@@ -476,7 +486,7 @@
     const t = activeTrip, tr = t.track;
     if (!pos && tr && tr.last) { pos = { lat: tr.last.lat, lon: tr.last.lon }; place = await placeName(pos); }
     if (tr && pos) addPoint(tr, { lat: pos.lat, lon: pos.lon, t: Date.now() }, Math.max(20, pos.acc || 0));
-    if (t.depStale && t.pos) t.depPlace = await placeName(t.pos);
+    if (t.depStale && t.pos && t.pos.acc <= COARSE_M) t.depPlace = await placeName(t.pos);
     tripDraft = { id: uid(), type: 'trip', date: t.date, job: t.job, depTime: t.depTime, depPlace: t.depPlace, arrTime: hhmm(now), arrPlace: place,
       km: null, note: '', a: t.pos, b: pos, aPlace: t.depPlace, bPlace: place, kmNote: '' };
     const d = tripDraft;
@@ -491,7 +501,8 @@
     } else if (t.pos && pos) { const r = await routeKm(t.pos, pos); d.km = r.km; d.kmNote = kmNoteText(r); }
     else d.kmNote = 'Sijainti puuttuu. Kirjoita paikat ja kilometrit käsin.';
     const worst = Math.max((t.pos && t.pos.acc) || 0, (pos && pos.acc) || 0);
-    if (worst > 50) d.kmNote += ` Sijainnin tarkkuus oli heikko (±${worst} m) – tarkista paikat.`;
+    if (worst > COARSE_M) d.kmNote += ` Sijainti oli epätarkka (±${worst} m), joten paikkaa ei täytetty – kirjoita se käsin. ${COARSE_HELP}`;
+    else if (worst > 50) d.kmNote += ` Sijainnin tarkkuus oli heikko (±${worst} m) – tarkista paikat.`;
     activeTrip = null; saveTripState(); renderTrip();
   });
   $('#tripCancel').addEventListener('click', () => { stopTracking(); activeTrip = null; saveTripState(); renderTrip(); toast('Matka peruttu'); });
@@ -542,6 +553,16 @@
 
   renderToday();
 
+  $('#appVersion').textContent = 'Versio ' + APP_VERSION;
+  if ('serviceWorker' in navigator) {
+    // Kun uusi versio on asentunut taustalla, ladataan sivu kerran uudelleen (ei kesken matkan tai kirjauksen)
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloaded || activeTrip || tripDraft || drafts.length || listening) return;
+      reloaded = true; location.reload();
+    });
+  }
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
