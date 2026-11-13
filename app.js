@@ -305,12 +305,19 @@
   const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   const saveTripState = () => { store.save('tl.trip', activeTrip); store.save('tl.tripDraft', tripDraft); };
 
-  function getPos() {
+  // Ensimmäinen sijainti on usein karkea (verkkopaikannus). Kerätään sijainteja hetki ja
+  // otetaan tarkin; lopetetaan heti, kun tarkkuus on riittävä.
+  function getPos(maxMs = 15000, goodM = 15) {
     return new Promise((res, rej) => {
       if (!navigator.geolocation) return rej(new Error('nogeo'));
-      navigator.geolocation.getCurrentPosition(
-        (p) => res({ lat: p.coords.latitude, lon: p.coords.longitude }), rej,
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
+      let best = null, id = null;
+      const done = (err) => { clearTimeout(timer); navigator.geolocation.clearWatch(id); best ? res(best) : rej(err || new Error('nofix')); };
+      const timer = setTimeout(done, maxMs);
+      id = navigator.geolocation.watchPosition((p) => {
+        const f = { lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy) };
+        if (!best || f.acc < best.acc) best = f;
+        if (f.acc <= goodM) done();
+      }, (err) => { if (err.code === 1) done(err); }, { enableHighAccuracy: true, maximumAge: 0, timeout: maxMs });
     });
   }
   async function fetchJSON(url) {
@@ -413,8 +420,14 @@
     activeTrip.acc = Math.round(acc);
     if (acc <= 50) {
       const pt = { lat: p.coords.latitude, lon: p.coords.longitude, t: Date.now() };
-      if (!activeTrip.pos) { activeTrip.pos = { lat: pt.lat, lon: pt.lon }; if (!activeTrip.depPlace) activeTrip.depPlace = coordText(pt); }
+      if (!activeTrip.pos) { activeTrip.pos = { lat: pt.lat, lon: pt.lon, acc: Math.round(acc) }; if (!activeTrip.depPlace) activeTrip.depPlace = coordText(pt); }
       if (!activeTrip.track) activeTrip.track = { m: 0, last: null, gaps: 0, n: 0 };
+      // Ennen liikkeelle lähtöä: jos GPS tarkentuu, korjataan lähtöpiste (eikä lasketa korjausta ajetuksi matkaksi)
+      const tr0 = activeTrip.track;
+      if (tr0.n <= 1 && acc < (activeTrip.pos.acc == null ? 1e9 : activeTrip.pos.acc) - 5 && (!tr0.last || haversine(tr0.last, pt) * 1000 <= Math.max(activeTrip.pos.acc || 0, 100))) {
+        activeTrip.pos = { lat: pt.lat, lon: pt.lon, acc: Math.round(acc) };
+        tr0.last = pt; tr0.n = 1; activeTrip.depStale = true;
+      }
       addPoint(activeTrip.track, pt, Math.max(20, acc)); // kynnys suodattaa paikallaan olon GPS-heilunnan
       store.save('tl.trip', activeTrip);
     }
@@ -450,7 +463,7 @@
 
   $('#tripStart').addEventListener('click', async (ev) => {
     const now = new Date();
-    const { pos, place } = await locate(ev.currentTarget, 'Haetaan sijaintia…');
+    const { pos, place } = await locate(ev.currentTarget, 'Haetaan tarkkaa sijaintia…');
     activeTrip = { date: P.iso(now), depTime: hhmm(now), pos, depPlace: place, job: $('#tripJob').value.trim().toUpperCase() };
     if (pos) activeTrip.track = { m: 0, last: { lat: pos.lat, lon: pos.lon, t: Date.now() }, gaps: 0, n: 1 };
     saveTripState(); renderTrip(); startTracking();
@@ -458,11 +471,12 @@
   });
   $('#tripStop').addEventListener('click', async (ev) => {
     const now = new Date();
-    let { pos, place } = await locate(ev.currentTarget, 'Haetaan sijaintia…');
+    let { pos, place } = await locate(ev.currentTarget, 'Haetaan tarkkaa sijaintia…');
     stopTracking();
     const t = activeTrip, tr = t.track;
     if (!pos && tr && tr.last) { pos = { lat: tr.last.lat, lon: tr.last.lon }; place = await placeName(pos); }
-    if (tr && pos) addPoint(tr, { lat: pos.lat, lon: pos.lon, t: Date.now() }, 20);
+    if (tr && pos) addPoint(tr, { lat: pos.lat, lon: pos.lon, t: Date.now() }, Math.max(20, pos.acc || 0));
+    if (t.depStale && t.pos) t.depPlace = await placeName(t.pos);
     tripDraft = { id: uid(), type: 'trip', date: t.date, job: t.job, depTime: t.depTime, depPlace: t.depPlace, arrTime: hhmm(now), arrPlace: place,
       km: null, note: '', a: t.pos, b: pos, aPlace: t.depPlace, bPlace: place, kmNote: '' };
     const d = tripDraft;
@@ -476,6 +490,8 @@
       else { d.km = tracked; d.kmNote = 'GPS-seuranta katkesi matkan aikana (sovellus oli taustalla). Kilometrit voivat olla todellista pienemmät – tarkista.'; }
     } else if (t.pos && pos) { const r = await routeKm(t.pos, pos); d.km = r.km; d.kmNote = kmNoteText(r); }
     else d.kmNote = 'Sijainti puuttuu. Kirjoita paikat ja kilometrit käsin.';
+    const worst = Math.max((t.pos && t.pos.acc) || 0, (pos && pos.acc) || 0);
+    if (worst > 50) d.kmNote += ` Sijainnin tarkkuus oli heikko (±${worst} m) – tarkista paikat.`;
     activeTrip = null; saveTripState(); renderTrip();
   });
   $('#tripCancel').addEventListener('click', () => { stopTracking(); activeTrip = null; saveTripState(); renderTrip(); toast('Matka peruttu'); });
